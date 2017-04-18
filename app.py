@@ -14,7 +14,7 @@ class Entity(object):
         self.entity_id = entity_id
         self.x, self.y = x, y
 
-    def __str__(self):
+    def __repr__(self):
         return "%d" % self.entity_id
 
     def dist_to(self, to_unit):
@@ -41,16 +41,16 @@ class ShipEntity(Entity):
 
         return near_entity
 
-    def __str__(self):
-        return "S%s" % super(Entity, self)
+    def __repr__(self):
+        return "S%d" % self.entity_id
 
 class BarrelEntity(Entity):
     def __init__(self, entity_id, x, y, rum):
         Entity.__init__(self, entity_id, x, y)
         self.rum = rum
 
-    def __str__(self):
-        return "B%s" % super(Entity, self)
+    def __repr__(self):
+        return "B%d" % self.entity_id
 
 class World(object):
     """Описание игрового мира"""
@@ -104,45 +104,58 @@ class Strategy(object):
     def __init__(self, world):
         self.world = world
 
-    def get_actions(self):
+    def get_actions(self, ship):
 
         command = None
         action = None
 
-        find_solution = True
-        while find_solution:
-            if action == None:
+        near_enemy = ship.find_near_entity(self.world.enemyships)
+        near_barrel = ship.find_near_entity(self.world.barrels)
+
+        while command is None:
+            if action is None:
                 action = Actions.MOVE
 
             elif action == Actions.MOVE:
+                
+                print >> sys.stderr, "ENEMY" ,ship.dist_to(near_enemy) < 4, ship.dist_to(near_enemy)
+                
+                if near_enemy is not None and ship.dist_to(near_enemy) < 4:
+                    action = Actions.FIRE
+                    
+                elif ship.rum > 60:
+                    action = Actions.MOVE_ENEMY
+                else:
+                    action = Actions.NEED_RUM
+            elif action == Actions.MOVE_ENEMY:
 
-                command = (Commands.MOVE, target)
+                target = near_enemy
+                if ship.dist_to(target) > 3:
+                    command = (Commands.MOVE, target)
+                else:
+                    action = Actions.FIRE
 
-                find_solution = True
-            elif action == Actions.NEAR_ENEMY:
-                pass
             elif action == Actions.NEED_RUM:
-                pass
-            elif action == Actions.NEED_RUM:
-                pass
+                target = near_barrel
+                if target is None:
+                    action = Actions.MOVE_ENEMY
+                else:
+                    command = (Commands.MOVE, target)
+
             elif action == Actions.FIRE:
-                pass
+                command = (Commands.FIRE, near_enemy)
+            print >> sys.stderr, action, command
 
 
-        actions = []
+        return self.parse_command(command)
 
-        for ship in self.world.ships:
-            near_entity = ship.find_near_entity(self.world.barrels)
-            if not near_entity is None:
-                actions.append("MOVE %d %d" % (near_entity.x, near_entity.y))
+    def parse_command(self, command):
+        if command[0] == Commands.MOVE:
+            res = "MOVE %d %d" % (command[1].x, command[1].y)
+        elif command[0] == Commands.FIRE:
+            res = "FIRE %d %d" % (command[1].x, command[1].y)
+        return res
 
-        if len(actions) == 0:
-            actions.append("WAIT")
-        return "\n".join(actions)
-
-    def next_move(self):
-        """Определеяем следующий ход"""
-        pass
 
 
 WORLD = World()
@@ -153,4 +166,7 @@ while True:
 
     STRATEGY = Strategy(WORLD)
 
-    print STRATEGY.get_actions()
+    for my_ship in WORLD.ships:
+        result = STRATEGY.get_actions(my_ship)
+        print result
+
