@@ -91,7 +91,8 @@ class Strategy(object):
 
         for ship in self.world.ships:
             near_entity = ship.find_near_entity(self.world.barrels)
-            actions.append("MOVE %d %d" % (near_entity.x, near_entity.y))
+            if near_entity is None:
+                actions.append("MOVE %d %d" % (near_entity.x, near_entity.y))
         return "\n".join(actions)
 
 
