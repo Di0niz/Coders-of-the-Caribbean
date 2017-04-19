@@ -53,8 +53,8 @@ def cube_rotation(a, b):
     x, y, z = hex
     rotation = 0
     for i in xrange(6):
-        
-        dx, dy, dz = cube_direction(i) 
+
+        dx, dy, dz = cube_direction(i)
 
         if dx == x and dy == y and dz == z:
             rotation = i
@@ -218,14 +218,19 @@ class Commands(object):
     MINE = 3
     SLOWER = 4
     WAIT = 5
+    PORT = 6
+    STARBOARD = 7
+    FASTER = 8
+    SLOWER = 9
 
 class Actions(object):
-    MOVE = 1
-    FIRE = 2
-    NEAR_ENEMY = 3
-    NEED_RUM = 4
-    MOVE_ENEMY = 5
-    MOVE_RUM = 6
+    MOVE = "MOVE"
+    FIRE = "FIRE"
+    NEAR_ENEMY = "NEAR_ENEMY"
+    NEED_RUM = "NEED_RUM"
+    MOVE_ENEMY = "MOVE_ENEMY"
+    MOVE_RUM = "MOVE_RUM"
+    MOVE_AWAY = "MOVE_AWAY"
 
 class Problems(object):
     MOVE = 1
@@ -241,6 +246,8 @@ class Strategy(object):
         self.world = world
 
     def get_actions(self, ship, exclude = None):
+        
+        print >> sys.stderr, ship
 
         command = None
         action = None
@@ -253,20 +260,18 @@ class Strategy(object):
                 action = Actions.MOVE
 
             elif action == Actions.MOVE:
-                print >> sys.stderr, "ENEMY" ,ship.dist_to(near_enemy) < 5, ship.dist_to(near_enemy)
                 
         
-                if ship.rum > 60 and near_enemy is not None:
+                if ship.rum > 40 and near_enemy is not None:
                     action = Actions.MOVE_ENEMY
-                elif near_enemy is not None and near_enemy.speed == 0 and ship.dist_to(near_enemy) < 5:
-                    print >> sys.stderr, "ENEMY" ,ship.dist_to(near_enemy) < 5, ship.dist_to(near_enemy)
+                elif near_enemy is not None and near_enemy.speed == 0 and ship.dist_to(near_enemy) < 3:
                     action = Actions.FIRE
                 else:
                     action = Actions.NEED_RUM
 
             elif action == Actions.MOVE_ENEMY:
 
-                if near_enemy.speed > 0 and ship.dist_to(near_enemy) > 4:
+                if near_enemy.speed > 0 and ship.dist_to(near_enemy) > 2:
                     command = (Commands.MOVE, near_enemy)
                 elif near_enemy.speed == 0:
                     action = Actions.FIRE
@@ -280,7 +285,23 @@ class Strategy(object):
                     command = (Commands.MOVE, near_barrel)
 
             elif action == Actions.FIRE:
-                command = (Commands.FIRE, near_enemy)
+                if ship.fire_wait == 0:
+                    command = (Commands.FIRE, near_enemy)
+                else:
+                    action = Actions.MOVE_AWAY
+            
+            elif action == Actions.MOVE_AWAY:
+                ship_cube = offset_to_cube((ship.x, ship.y))
+                enemy_cube = offset_to_cube((near_enemy.x, near_enemy.y))
+                #определяем разворот
+                rotation = cube_rotation(ship_cube, enemy_cube)
+                rotation = (rotation + 1) % 6
+                # поворачиваем
+                next_cube = cube_neighbor(ship_cube, rotation)
+
+                col, row = cube_to_offset(next_cube)
+                
+                command = (Commands.MOVE, Entity(0, col, row))
 
             print >> sys.stderr, action, command
 
@@ -301,15 +322,16 @@ while True:
         commands[my_ship] = STRATEGY.get_actions(my_ship)
 
     # проверяем есть ли дубли, если есть тогда исключаем общую цель
-    for i in WORLD.ships:
-        for j in WORLD.ships:
-            if i != j:
-                if commands[i][0] == Commands.MOVE and isinstance(commands[i][1],BarrelEntity):
-                    if commands[i][1] == commands[j][1]:
-                        commands[j] = STRATEGY.get_actions(j, commands[j][1])
+#    for i in WORLD.ships:
+#        for j in WORLD.ships:
+#            if i != j:
+#                if commands[i][0] == Commands.MOVE and isinstance(commands[i][1],BarrelEntity):
+#                    if commands[i][1] == commands[j][1]:
+#                        commands[j] = STRATEGY.get_actions(j, commands[j][1])
     
     # выводим список доступных комманд
-    for ship in commands:
+    # сохраняем порядок работы с короблем
+    for ship in WORLD.ships:
         command = ship.make_command(commands[ship])
         print command
 
