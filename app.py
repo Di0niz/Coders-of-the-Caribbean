@@ -184,7 +184,7 @@ class World(object):
         self.cannonballs = []
 
         # инициализируем поле
-        self.field = [0] * World.WIDTH * World.HEIGHT
+        self.field = {}
 
         my_ship_count = int(raw_input())  # the number of remaining ships
         entity_count = int(raw_input())  # the number of entities (e.g. ships, mines or cannonballs)
@@ -193,9 +193,11 @@ class World(object):
             entity_id, entity_type, x, y, arg_1, arg_2, arg_3, arg_4 = raw_input().split()
             if entity_type == EntityType.BARREL:
                 self.barrels.append(BarrelEntity(int(entity_id), int(x), int(y), int(arg_1)))
-                self.field[int(x)+ int(y) * World.HEIGHT] = 1
+                self.field[(int(x), int(y))] = 0
+            elif entity_type == EntityType.CANNONBALL:
+                self.field[(int(x), int(y))] = int(arg_2)
             elif entity_type == EntityType.SHIP:
-
+    
                 if not int(entity_id) in self.allships:
                     ship = ShipEntity(int(entity_id), int(x), int(y), int(arg_1), int(arg_2), int(arg_3), int(arg_4))
                     # сохраняем информацию о корабле
@@ -208,8 +210,9 @@ class World(object):
                     self.ships.append(ship)
                 else:
                     self.enemyships.append(ship)
-
-                self.field[int(x)+ int(y) * World.HEIGHT] = 1
+                
+                # устанавливаем центр 
+                self.field[(int(x), int(y))] = 0
 
 
 class Commands(object):
@@ -308,6 +311,7 @@ class Strategy(object):
 
         return command
 
+    
 WORLD = World()
 
 while True:
