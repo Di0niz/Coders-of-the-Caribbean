@@ -144,6 +144,16 @@ class ShipEntity(Entity):
                 min_dist = cur_dist
 
         return near_entity
+        
+    def can_move(self, world):
+        
+        cur_speed = min(1, self.speed) + 1
+        current_point = offset_to_cube((self.x,self.y))
+        next_point = cube_neighbor(current_point, self.rotation, cur_speed)
+
+        x,y = cube_to_offset(next_point)
+
+        return (0< x < 22) and (0 < y < 20)
 
     def make_command(self, command):
         if command[0] == Commands.MOVE:
@@ -290,14 +300,36 @@ class Strategy(object):
 
         action = self.find_problem(ship, near_enemy, near_barrel)
 
+        target = 0
+
         while command is None:
             if action == Actions.MOVE:
-                pass
+
+                # проверяем препятствие
+                if ship.speed == 0 and ship.can_move(self.world):
+                    command = (Commands.FASTER, )
+
+                else:
+                    ship_cube = offset_to_cube((ship.x, ship.y))
+
+                    enemy_cube = offset_to_cube(target)
+                    #определяем разворот
+                    rotation = cube_rotation(ship_cube, enemy_cube)
+
+                    if ship.rotation == rotation and ship.speed == 1:
+                        action = Actions.MOVE_FASTER
+                    elif ship.rotation > rotation:
+                        action = Actions.MOVE_PORT
+                    elif ship.rotation < rotation:
+                        action = Actions.MOVE_STARBOARD
+                    else:
+                        action = Actions.MOVE_PORT
 
             elif action == Actions.MOVE_ENEMY:
 
                 if near_enemy.speed > 0 and ship.dist_to(near_enemy) > 2:
-                    command = (Commands.MOVE, near_enemy)
+                    action = Actions.MOVE
+                    target = near_barrel.x, near_barrel.y
                 elif near_enemy.speed == 0:
                     action = Actions.FIRE
                 else:
@@ -307,7 +339,8 @@ class Strategy(object):
                 if near_barrel is None:
                     action = Actions.MOVE_ENEMY
                 else:
-                    command = (Commands.MOVE, near_barrel)
+                    action = Actions.MOVE
+                    target = near_barrel.x, near_barrel.y
 
             elif action == Actions.FIRE:
                 if ship.fire_wait == 0:
@@ -316,18 +349,18 @@ class Strategy(object):
                     action = Actions.MOVE_RING
 
             elif action == Actions.MOVE_RING:
+                
                 ship_cube = offset_to_cube((ship.x, ship.y))
+
                 enemy_cube = offset_to_cube((near_enemy.x, near_enemy.y))
                 #определяем разворот
                 rotation = cube_rotation(ship_cube, enemy_cube)
                 rotation = (rotation + 1) % 6
                 # поворачиваем
-                if rotation > ship.rotation:
-                    action = Actions.MOVE_PORT
-                elif rotation < ship.rotation:
-                    action = Actions.MOVE_STARBOARD
-                else:
-                    action = Actions.MOVE_FASTER
+                next_cube = cube_neighbor(ship_cube, rotation)
+
+                target = cube_to_offset(next_cube)
+                action = Actions.MOVE
 
             elif action == Actions.MOVE_PORT:
                 command = (Commands.PORT, None)
