@@ -153,6 +153,14 @@ class ShipEntity(Entity):
             self.fire_wait = 2
         elif command[0] == Commands.WAIT:
             res = "WAIT"
+        elif command[0] == Commands.STARBOARD:
+            res = "STARBOARD"
+        elif command[0] == Commands.PORT:
+            res = "PORT"
+        elif command[0] == Commands.FASTER:
+            res = "FASTER"
+        elif command[0] == Commands.SLOWER:
+            res = "SLOWER"
         return res
 
     def __repr__(self):
@@ -187,17 +195,22 @@ class World(object):
         self.field = {}
 
         my_ship_count = int(raw_input())  # the number of remaining ships
+        print >> sys.stderr, my_ship_count
+
         entity_count = int(raw_input())  # the number of entities (e.g. ships, mines or cannonballs)
+        print >> sys.stderr, entity_count
         for i in xrange(entity_count):
 
-            entity_id, entity_type, x, y, arg_1, arg_2, arg_3, arg_4 = raw_input().split()
+            raw = raw_input()
+            print >> sys.stderr, raw
+            entity_id, entity_type, x, y, arg_1, arg_2, arg_3, arg_4 = raw.split()
             if entity_type == EntityType.BARREL:
                 self.barrels.append(BarrelEntity(int(entity_id), int(x), int(y), int(arg_1)))
                 self.field[(int(x), int(y))] = 0
             elif entity_type == EntityType.CANNONBALL:
                 self.field[(int(x), int(y))] = int(arg_2)
             elif entity_type == EntityType.SHIP:
-    
+
                 if not int(entity_id) in self.allships:
                     ship = ShipEntity(int(entity_id), int(x), int(y), int(arg_1), int(arg_2), int(arg_3), int(arg_4))
                     # сохраняем информацию о корабле
@@ -210,8 +223,8 @@ class World(object):
                     self.ships.append(ship)
                 else:
                     self.enemyships.append(ship)
-                
-                # устанавливаем центр 
+
+                # устанавливаем центр
                 self.field[(int(x), int(y))] = 0
 
 
@@ -233,7 +246,11 @@ class Actions(object):
     NEED_RUM = "NEED_RUM"
     MOVE_ENEMY = "MOVE_ENEMY"
     MOVE_RUM = "MOVE_RUM"
-    MOVE_AWAY = "MOVE_AWAY"
+    MOVE_RING = "MOVE_RING"
+    MOVE_PORT = "MOVE_PORT"
+    MOVE_STARBOARD = "MOVE_STARBOARD"
+    MOVE_FASTER = "MOVE_FASTER"
+    MOVE_SLOWER = "MOVE_SLOWER"
 
 class Problems(object):
     MOVE = 1
@@ -248,8 +265,21 @@ class Strategy(object):
     def __init__(self, world):
         self.world = world
 
+    def find_problem(self, ship, near_enemy, near_barrel):
+
+        action = Actions.MOVE
+
+        if ship.rum > 40 and near_enemy is not None:
+            action = Actions.MOVE_ENEMY
+        elif near_enemy is not None and near_enemy.speed == 0 and ship.dist_to(near_enemy) < 3:
+            action = Actions.FIRE
+        else:
+            action = Actions.NEED_RUM
+
+        return action
+
     def get_actions(self, ship, exclude = None):
-        
+
         print >> sys.stderr, ship
 
         command = None
@@ -258,19 +288,11 @@ class Strategy(object):
         near_enemy = ship.find_near_entity(SUB(self.world.enemyships, exclude))
         near_barrel = ship.find_near_entity(SUB(self.world.barrels, exclude))
 
-        while command is None:
-            if action is None:
-                action = Actions.MOVE
+        action = self.find_problem(ship, near_enemy, near_barrel)
 
-            elif action == Actions.MOVE:
-                
-        
-                if ship.rum > 40 and near_enemy is not None:
-                    action = Actions.MOVE_ENEMY
-                elif near_enemy is not None and near_enemy.speed == 0 and ship.dist_to(near_enemy) < 3:
-                    action = Actions.FIRE
-                else:
-                    action = Actions.NEED_RUM
+        while command is None:
+            if action == Actions.MOVE:
+                pass
 
             elif action == Actions.MOVE_ENEMY:
 
@@ -291,27 +313,38 @@ class Strategy(object):
                 if ship.fire_wait == 0:
                     command = (Commands.FIRE, near_enemy)
                 else:
-                    action = Actions.MOVE_AWAY
-            
-            elif action == Actions.MOVE_AWAY:
+                    action = Actions.MOVE_RING
+
+            elif action == Actions.MOVE_RING:
                 ship_cube = offset_to_cube((ship.x, ship.y))
                 enemy_cube = offset_to_cube((near_enemy.x, near_enemy.y))
                 #определяем разворот
                 rotation = cube_rotation(ship_cube, enemy_cube)
                 rotation = (rotation + 1) % 6
                 # поворачиваем
-                next_cube = cube_neighbor(ship_cube, rotation)
+                if rotation > ship.rotation:
+                    action = Actions.MOVE_PORT
+                elif rotation < ship.rotation:
+                    action = Actions.MOVE_STARBOARD
+                else:
+                    action = Actions.MOVE_FASTER
 
-                col, row = cube_to_offset(next_cube)
-                
-                command = (Commands.MOVE, Entity(0, col, row))
+            elif action == Actions.MOVE_PORT:
+                command = (Commands.PORT, None)
+            elif action == Actions.MOVE_STARBOARD:
+                command = (Commands.STARBOARD, None)
+            elif action == Actions.MOVE_FASTER:
+                command = (Commands.FASTER, None)
+
+
+
 
             print >> sys.stderr, action, command
 
 
         return command
 
-    
+
 WORLD = World()
 
 while True:
