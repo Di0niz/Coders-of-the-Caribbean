@@ -13,7 +13,7 @@ def cube_to_offset(cube):
 
 # convert odd-r offset to cube
 def offset_to_cube(offset):
-    row, col = offset
+    col,row = offset
 
     x = col - (row - (row&1)) / 2
     z = row
@@ -49,10 +49,12 @@ def cube_neighbor(hex, rotation, radius = 1):
 def cube_rotation(a, b):
     ax, ay, az = a
     bx, by, bz = cube_near(a, b)
-    hex = (bx - ax, by - ay, bz - az)
-    x, y, z = hex
-    rotation = 0
-    for i in xrange(6):
+
+    x, y, z = (bx - ax, by - ay, bz - az)
+    
+    #print >> sys.stderr, (bx, by, bz), a, " = ",  (x, y, z)
+    rotation = -1
+    for i in range(6):
 
         dx, dy, dz = cube_direction(i)
 
@@ -111,9 +113,22 @@ class Entity(object):
         return "%d" % self.entity_id
 
     def dist_to(self, to_unit):
+        return self.dist_to_target((to_unit.x, to_unit.y))
+
+    def dist_to_target(self, target):
         self_cube = offset_to_cube((self.x, self.y))
-        unit_cube = offset_to_cube((to_unit.x, to_unit.y))
+        unit_cube = offset_to_cube(target)
         return cube_distance(self_cube, unit_cube)
+
+    def rotation_to(self, to_unit):
+        return self.rotation_to_target((to_unit.x, to_unit.y))
+
+    def rotation_to_target(self, target):
+
+        ship_cube = offset_to_cube((self.x, self.y))
+        target_cube = offset_to_cube(target)
+
+        return cube_rotation(ship_cube, target_cube)
 
 class ShipEntity(Entity):
     def __init__(self, entity_id, x, y, rotation, speed, rum, player):
@@ -184,6 +199,23 @@ class BarrelEntity(Entity):
     def __repr__(self):
         return "B%d" % self.entity_id
 
+class CannonballEntity(Entity):
+    def __init__(self, entity_id, x, y, target, remain_turns):
+        Entity.__init__(self, entity_id, x, y)
+        self.target = target
+        self.remain_turns = remain_turns
+
+    def __repr__(self):
+        return "B%d" % self.entity_id
+
+class MineEntity(Entity):
+    def __init__(self, entity_id, x, y):
+        Entity.__init__(self, entity_id, x, y)
+        #self.rum = rum
+
+    def __repr__(self):
+        return "M%d" % self.entity_id
+
 class World(object):
     """Описание игрового мира"""
 
@@ -200,6 +232,7 @@ class World(object):
         self.barrels = []
         self.enemyships = []
         self.cannonballs = []
+        self.mines = []
 
         # инициализируем поле
         self.field = {}
@@ -215,10 +248,18 @@ class World(object):
             print >> sys.stderr, raw
             entity_id, entity_type, x, y, arg_1, arg_2, arg_3, arg_4 = raw.split()
             if entity_type == EntityType.BARREL:
-                self.barrels.append(BarrelEntity(int(entity_id), int(x), int(y), int(arg_1)))
-                self.field[(int(x), int(y))] = 0
+                barrel = BarrelEntity(int(entity_id), int(x), int(y), int(arg_1))
+                self.barrels.append(barrel)
+                self.field[(int(x), int(y))] = barrel
             elif entity_type == EntityType.CANNONBALL:
-                self.field[(int(x), int(y))] = int(arg_2)
+                cannonball = CannonballEntity(int(entity_id), int(x), int(y), int(arg_1), int(arg_2))
+                #self.field[(int(x), int(y))] = int(arg_2)
+            elif entity_type == EntityType.MINE:
+
+                mine = MineEntity(int(entity_id), int(x), int(y))
+                self.mines.append(mine)
+                self.field[(int(x), int(y))] = mine
+            
             elif entity_type == EntityType.SHIP:
 
                 if not int(entity_id) in self.allships:
@@ -237,6 +278,22 @@ class World(object):
                 # устанавливаем центр
                 self.field[(int(x), int(y))] = 0
 
+    def collision(self, ship):
+        """Проверяем пересечение коробля с минами"""
+
+        hex = offset_to_cube((ship.x, ship.y))
+        col = False
+        for i in range(3, ship.speed *2 + 1):
+
+            neighbor = cube_to_offset(cube_neighbor(hex, ship.rotation, i))
+
+            if neighbor in self.field:
+                target = self.field[neighbor]
+                if isinstance(target,MineEntity):
+                    col = True
+
+        return col
+
 
 class Commands(object):
     MOVE = 1
@@ -252,6 +309,7 @@ class Commands(object):
 class Actions(object):
     MOVE = "MOVE"
     FIRE = "FIRE"
+    FIRE_ENEMY = "FIRE_ENEMY"
     NEAR_ENEMY = "NEAR_ENEMY"
     NEED_RUM = "NEED_RUM"
     MOVE_ENEMY = "MOVE_ENEMY"
@@ -261,6 +319,7 @@ class Actions(object):
     MOVE_STARBOARD = "MOVE_STARBOARD"
     MOVE_FASTER = "MOVE_FASTER"
     MOVE_SLOWER = "MOVE_SLOWER"
+    EXCLUDE_MINE = "EXCLUDE_MINE"
 
 class Problems(object):
     MOVE = 1
@@ -279,10 +338,12 @@ class Strategy(object):
 
         action = Actions.MOVE
 
-        if ship.rum > 40 and near_enemy is not None:
+        if self.world.collision(ship):
+            action = Actions.EXCLUDE_MINE
+        elif ship.rum > 70:
             action = Actions.MOVE_ENEMY
-        elif near_enemy is not None and near_enemy.speed == 0 and ship.dist_to(near_enemy) < 3:
-            action = Actions.FIRE
+        elif near_enemy.speed == 0 and ship.dist_to(near_enemy) < 3:
+            action = Actions.MOVE_ENEMY
         else:
             action = Actions.NEED_RUM
 
@@ -303,37 +364,51 @@ class Strategy(object):
         target = 0
 
         while command is None:
+            
             if action == Actions.MOVE:
 
                 # проверяем препятствие
-                if ship.speed == 0 and ship.can_move(self.world):
-                    command = (Commands.FASTER, )
 
-                else:
-                    ship_cube = offset_to_cube((ship.x, ship.y))
+                # определяем разворот
+                rotation = ship.rotation_to_target(target)
 
-                    enemy_cube = offset_to_cube(target)
-                    #определяем разворот
-                    rotation = cube_rotation(ship_cube, enemy_cube)
+              
+                d_rot = (rotation - ship.rotation + 6) % 6
 
-                    if ship.rotation == rotation and ship.speed == 1:
-                        action = Actions.MOVE_FASTER
-                    elif ship.rotation > rotation:
-                        action = Actions.MOVE_PORT
-                    elif ship.rotation < rotation:
-                        action = Actions.MOVE_STARBOARD
+                if d_rot == 0 and ship.speed == 0:
+                    action = Actions.MOVE_FASTER
+                elif d_rot == 0 and ship.speed == 1 and ship.dist_to_target(target) > 3:
+                    action = Actions.MOVE_FASTER
+                elif d_rot == 0 and ship.speed == 2:
+                    action = Actions.FIRE_ENEMY
+                elif d_rot < 3:
+                    if ship.speed == 2 and ship.dist_to_target(target) < 3:
+                        action = Actions.MOVE_SLOWER
                     else:
                         action = Actions.MOVE_PORT
+                elif d_rot > 3:
+                    if ship.speed == 2 and ship.dist_to_target(target) < 3:
+                        action = Actions.MOVE_SLOWER
+                    else:
+                        action = Actions.MOVE_STARBOARD
+                else:
+                    action = Actions.FIRE_ENEMY
 
             elif action == Actions.MOVE_ENEMY:
 
-                if near_enemy.speed > 0 and ship.dist_to(near_enemy) > 2:
+                if near_enemy.speed > 0 and ship.dist_to(near_enemy) > 3:
                     action = Actions.MOVE
-                    target = near_barrel.x, near_barrel.y
+                    target = near_enemy.x, near_enemy.y
                 elif near_enemy.speed == 0:
                     action = Actions.FIRE
                 else:
                     command = (Commands.WAIT, )
+
+            elif action == Actions.EXCLUDE_MINE:
+                if ship.speed == 2:
+                    action = Actions.MOVE_SLOWER
+                else:
+                    action = Actions.MOVE_PORT
 
             elif action == Actions.NEED_RUM:
                 if near_barrel is None:
@@ -342,9 +417,14 @@ class Strategy(object):
                     action = Actions.MOVE
                     target = near_barrel.x, near_barrel.y
 
-            elif action == Actions.FIRE:
+            elif action == Actions.FIRE_ENEMY:
                 if ship.fire_wait == 0:
                     command = (Commands.FIRE, near_enemy)
+                else:
+                    command = (Commands.WAIT, None)
+            elif action == Actions.FIRE:
+                if ship.fire_wait == 0:
+                    action = Actions.FIRE_ENEMY
                 else:
                     action = Actions.MOVE_RING
 
@@ -368,6 +448,9 @@ class Strategy(object):
                 command = (Commands.STARBOARD, None)
             elif action == Actions.MOVE_FASTER:
                 command = (Commands.FASTER, None)
+
+            elif action == Actions.MOVE_SLOWER:
+                command = (Commands.SLOWER, None)
 
 
 
@@ -404,4 +487,3 @@ while True:
     for ship in WORLD.ships:
         command = ship.make_command(commands[ship])
         print command
-
