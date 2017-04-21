@@ -3,11 +3,12 @@ import unittest
 from subprocess import Popen, PIPE, STDOUT
 
 from app import ShipEntity, BarrelEntity
+import app
 
 
 class TestStringMethods(unittest.TestCase):
 
-    def test_search_path(self):
+    def tes2t_search_path(self):
         """Проверка упирания в границу"""
         raw = """3
         16
@@ -31,9 +32,12 @@ class TestStringMethods(unittest.TestCase):
 
         # Передаем тестовую выборку данных
         out, err = self.runapp(raw)
+        print out
+        print "---"
+        print err
 
 
-    def test_circle(self):
+    def tes2t_circle(self):
         """Проверка зацикливания варианта решения"""
 
         raw = """2
@@ -45,9 +49,12 @@ class TestStringMethods(unittest.TestCase):
         29 BARREL 14 6 14 0 0 0"""
 
         out, err = self.runapp(raw)
+        print out
+        print "---"
+        print err
 
 
-    def test_find_shortest_path(self):
+    def te2st_find_shortest_path(self):
         
         raw = """1
         27
@@ -110,36 +117,25 @@ class TestStringMethods(unittest.TestCase):
         33 BARREL 9 12 20 0 0 0
         32 BARREL 9 8 20 0 0 0"""
 
-        #out, err = self.runapp(raw)
+        out, err = self.runapp(raw)
 
-        #print out
-        #print "---"
-        #print err
+        print out
+        print "---"
+        print err
 
     def test_collition(self):
         """Проверяем реализацию коллизий"""
 
-        new_ship = ShipEntity(1, 10, 14, 1, 2, 100, 1)
+        #print self.find_shortest(new_ship, [target])
 
+        a = app.offset_to_cube((21, 18))
+        b = app.cube_neighbor(a, 3, 10)
 
-        target = BarrelEntity(2, 7, 5, 20)
-        
-        v = {}
-        i = 1
-        for ship in new_ship.futures():
-            print ship, ship.collitions, (ship.x, ship.y), ship.rotation
-            v[ship] = i
-            i = i + 1
-            print "---"
-            for ship1 in ship.futures():
-                print ship1, ship1.collitions, (ship1.x, ship1.y), ship1.rotation
+        print app.cube_to_offset(b)
+        new_ship = ShipEntity(1, 21, 18, 0, 1, 100, 1)
+        target = BarrelEntity(2, 3, 10, 20)
 
-
-        fut= new_ship.futures()[1].futures()[0].futures()[3].futures()[0].futures()[0]
-        print (fut.x, fut.y)
-
-
-        print self.find_shortest(new_ship, [target])
+        print new_ship, self.find_shortest(new_ship, [target])
 
 
 
@@ -148,7 +144,7 @@ class TestStringMethods(unittest.TestCase):
 
         # Передаем тестовую выборку данных
         out, err = p.communicate(input=raw)
-        return out, err[len(raw)+1: err.find("Traceback")-1]
+        return out, err #[len(raw)+1: err.find("Traceback")-1]
 
 
     def uniform_cost_search(self, start, goals):
@@ -156,68 +152,86 @@ class TestStringMethods(unittest.TestCase):
         https://en.wikipedia.org/wiki/Dijkstra's_algorithm
         """
 
-        node = start
+        node = (start.x, start.y)
         frontier = [node]
         explored = []
 
         # определение оптимальных вершин
-        vertex = {node:(0, None)}
+        vertex = {node:(0, start, None)}
 
         # пока есть что обходить
         while not (node is None or len(frontier) == 0):
 
             node = frontier.pop()
 
-            # помечаем, точки которые прошли
-            for n in node.collitions:
-                explored.append(n)
+            explored.append(node)
 
             distance = vertex[node][0]
+            ship = vertex[node][1]
 
-            for f in node.futures():
+            for future in ship.futures():
+                n = (future.x, future.y)
+                #for n in future.collitions:
+                if n not in explored:
 
-                for n in f.collitions:
+                    # определяем вес связи
+                    next_distance = distance + 1
 
-                    if n not in explored:
+                    # помечаем текущую вершину
+                    if n not in vertex or next_distance < vertex[n][0]:
+                        vertex[n] = (next_distance, future, node)
 
-                        # определяем вес связи
-                        next_distance = distance + 1
-
-                        # помечаем текущую вершину
-                        if f not in vertex or next_distance < vertex[f][0]:
-                            vertex[f] = (next_distance, node)
-
-                        if not (f in frontier or n in goals):
-                            frontier.append(f)
+                    if not (n in frontier or n in goals):
+                        frontier.append(n)
 
         return vertex
+
 
 
     def find_shortest(self, start, unit_goals):
         """Описание алгоритма поиска кратчайшего пути"""
         goals = []
 
+        mapping_goals = {}
+
         for unit in unit_goals:
             goals.append((unit.x, unit.y))
+            mapping_goals[(unit.x, unit.y)] = unit
+
+        #print goals
 
         vertex = self.uniform_cost_search(start, goals)
         # востанавливаем цепочку
 
-        print vertex
-        min_len = 30
-        min_solution = []
+        target = None
+        min_len = 100
+        min_node = None
+        min_ship = None
+        #min_solution, min_target = [], None
         for goal in goals:
-            solution = [goal]
-            node = vertex[goal][1]
- 
+
+            if goal in vertex:
+                distance, future, node =  vertex[goal]
+                if distance < min_len:
+                    min_distance = distance
+                    min_node = goal
+
+        future = None
+        if min_node is not None:
+            target = mapping_goals[min_node]
+            distance, prev_future, node = vertex[min_node]
+            future = prev_future
             while node is not None:
-                solution.insert(0, node)
-                node = vertex[node][1]
+                future = prev_future
+                dist, prev_future, node = vertex[node]
+                print prev_future,prev_future.rotation, prev_future.speed, prev_future.command
 
-            if min_len > len(solution):
-                min_solution = solution
 
-        return solution
+            # ищем цель
+
+        #print vertex, target
+
+        return target, future
 
 
 if __name__ == '__main__':

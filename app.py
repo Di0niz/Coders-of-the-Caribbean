@@ -140,6 +140,7 @@ class ShipEntity(Entity):
         self.fire_wait = 0
         # перечисление точек, в которых находится 
         self.collitions = []
+        self.command = None
 
     def update(self, x, y, rotation, speed, rum, player):
         Entity.update(self, x, y)
@@ -203,7 +204,7 @@ class ShipEntity(Entity):
         hex = offset_to_cube((self.x, self.y))
 
         new_pos = cube_neighbor(hex, self.rotation, speed)
-        front = cube_neighbor(new_pos, self.rotation, -1)
+        front = cube_neighbor(new_pos, (self.rotation + 3) % 6 , 1)
         back = cube_neighbor(new_pos, self.rotation, 1)
 
         newx, newy = cube_to_offset(new_pos)
@@ -215,14 +216,16 @@ class ShipEntity(Entity):
         else:
             rotation = self.rotation
 
-        if not (0 <= newx < 23):
+        if not (0 < newx < 23):
             return None
 
-        if not (0 <= newy < 21):
+        if not (0 < newy < 21):
             return None
-
 
         new_ship = ShipEntity(self.entity_id, newx, newy, rotation, speed, self.rum-1, self.player)
+
+        # сохраняем команду
+        new_ship.command = command
 
         # сначала запоминаем обычную позицию
         new_ship.collitions = [cube_to_offset(back), cube_to_offset(new_pos), cube_to_offset(front)]
@@ -246,10 +249,10 @@ class ShipEntity(Entity):
         futures = []
         for com in commands:
             f_ship = self.future(com)
-            if f_ship is not None:
+            if not (f_ship is None):
                 futures.append(f_ship)
         return futures
-        
+
 
     def __repr__(self):
         return "S%d [%d,%d]" % (self.entity_id, self.x,self.y)
@@ -357,19 +360,17 @@ class World(object):
 
         return col
 
-    def find_short_path(self, ship, goals):
-        """описываем алгоритм поиска корабля
-
-        За основу взят алгоритм с wiki
+    def uniform_cost_search(self, start, goals):
+        """ За основу взят алгоритм с wiki
         https://en.wikipedia.org/wiki/Dijkstra's_algorithm
         """
 
-        node = start.x, start
+        node = (start.x, start.y)
         frontier = [node]
         explored = []
 
         # определение оптимальных вершин
-        vertex = {node:(0, None)}
+        vertex = {node:(0, start, None)}
 
         # пока есть что обходить
         while not (node is None or len(frontier) == 0):
@@ -379,59 +380,73 @@ class World(object):
             explored.append(node)
 
             distance = vertex[node][0]
+            ship = vertex[node][1]
 
-            for n in self.get_nodes(node):
-                if n not in explored:
+            for future in ship.futures():
+                for n in future.collitions:
+                    if n not in explored:
 
-                    # определяем дистанцию по количеству ходов до точке
-                    next_distance = distance + self.links[node.entity_id][n.entity_id]
+                        # определяем вес связи
+                        next_distance = distance + 1
 
-                    # помечаем текущую вершину
-                    if n not in vertex or next_distance < vertex[n][0]:
-                        vertex[n] = (next_distance, node)
+                        # помечаем текущую вершину
+                        if n not in vertex or next_distance < vertex[n][0]:
+                            vertex[n] = (next_distance, future, node)
 
-                    if not (n in frontier or n in goals):
-                        frontier.append(n)
+                        if not (n in frontier or n in goals):
+                            frontier.append(n)
 
         return vertex
 
 
-    def find_shortest(self, start, goals):
+
+    def find_shortest(self, start, unit_goals):
         """Описание алгоритма поиска кратчайшего пути"""
+        goals = []
+
+        mapping_goals = {}
+
+        for unit in unit_goals:
+            goals.append((unit.x, unit.y))
+            mapping_goals[(unit.x, unit.y)] = unit
+
+        print goals
+
         vertex = self.uniform_cost_search(start, goals)
         # востанавливаем цепочку
 
-        min_len = 10
-        min_solution = []
+        target = None
+        min_len = 100
+        min_node = None
+        #min_solution, min_target = [], None
         for goal in goals:
-            solution = [goal]
-            node = vertex[goal][1]
- 
-            while node is not None:
-                solution.insert(0, node)
-                node = vertex[node][1]
 
-            if min_len > len(solution):
-                min_solution = solution
+            if goal in vertex:
+                distance, future, node =  vertex[goal]
+                if distance < min_len:
+                    min_distance = distance
+                    min_node = goal
 
-        return solution
+        if min_node is not None:
+            target = mapping_goals[min_node]
 
+        print vertex, target
 
-    def get_nodes(self, node):
-        """Определение списка соседних вершин"""
+        #    solution = [goal]
+        #    node = vertex[goal][2]
+        #    target = vertex[node][1]
+#
+        #    while node is not None:
+        #        solution.insert(0, node)
+        #        node = vertex[node][2]
+        #        target = vertex[node][1]
+#
+        #    if min_len > len(solution):
+        #        min_solution = solution
+        #        min_target = target
 
-        i = node.entity_id
-
-        nodes = []
-        for j in xrange(self.num_factory):
-            newnode = self.factories[j]
-            if self.links[i][j] > 0 and i != j and newnode not in nodes:
-                nodes.append(newnode)
-
-        return nodes
-
-
-        
+        #print "@",vertex[goals[0]]
+        return target, None
 
 
 class Commands(object):
@@ -495,8 +510,11 @@ class Strategy(object):
         command = None
         action = None
 
-        near_enemy = ship.find_near_entity(SUB(self.world.enemyships, exclude))
-        near_barrel = ship.find_near_entity(SUB(self.world.barrels, exclude))
+        #near_enemy = ship.find_near_entity(SUB(self.world.enemyships, exclude))
+        #near_barrel = ship.find_near_entity(SUB(self.world.barrels, exclude))
+
+        near_enemy, near_enemy_move = self.world.find_shortest(ship, SUB(self.world.enemyships, exclude))
+        near_barrel, near_barrel_move = self.world.find_shortest(ship, SUB(self.world.barrels, exclude))
 
         action = self.find_problem(ship, near_enemy, near_barrel)
 
@@ -605,27 +623,29 @@ class Strategy(object):
 
 WORLD = World()
 
-while False:
+if __name__ == '__main__':
+        
+    while True:
 
-    WORLD.update()
+        WORLD.update()
 
-    STRATEGY = Strategy(WORLD)
+        STRATEGY = Strategy(WORLD)
 
-    commands = {}
+        commands = {}
 
-    for my_ship in WORLD.ships:
-        commands[my_ship] = STRATEGY.get_actions(my_ship)
+        for my_ship in WORLD.ships:
+            commands[my_ship] = STRATEGY.get_actions(my_ship)
 
-    # проверяем есть ли дубли, если есть тогда исключаем общую цель
-#    for i in WORLD.ships:
-#        for j in WORLD.ships:
-#            if i != j:
-#                if commands[i][0] == Commands.MOVE and isinstance(commands[i][1],BarrelEntity):
-#                    if commands[i][1] == commands[j][1]:
-#                        commands[j] = STRATEGY.get_actions(j, commands[j][1])
-    
-    # выводим список доступных комманд
-    # сохраняем порядок работы с короблем
-    for ship in WORLD.ships:
-        command = ship.make_command(commands[ship])
-        print command
+        # проверяем есть ли дубли, если есть тогда исключаем общую цель
+    #    for i in WORLD.ships:
+    #        for j in WORLD.ships:
+    #            if i != j:
+    #                if commands[i][0] == Commands.MOVE and isinstance(commands[i][1],BarrelEntity):
+    #                    if commands[i][1] == commands[j][1]:
+    #                        commands[j] = STRATEGY.get_actions(j, commands[j][1])
+        
+        # выводим список доступных комманд
+        # сохраняем порядок работы с короблем
+        for ship in WORLD.ships:
+            command = ship.make_command(commands[ship])
+            print command
