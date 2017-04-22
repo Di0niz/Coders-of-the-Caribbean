@@ -291,7 +291,8 @@ class World(object):
         self.mines = []
 
         # инициализируем поле
-        self.field = {}
+        self.collision = []
+        self.collision_future = {}
 
         my_ship_count = int(raw_input())  # the number of remaining ships
         print >> sys.stderr, my_ship_count
@@ -310,11 +311,16 @@ class World(object):
             elif entity_type == EntityType.CANNONBALL:
                 cannonball = CannonballEntity(int(entity_id), int(x), int(y), int(arg_1), int(arg_2))
                 #self.field[(int(x), int(y))] = int(arg_2)
+                if not (int(arg_2) in self.collision_future):
+                    self.collision_future[int(arg_2)] = []
+
+                self.collision_future[int(arg_2)].append((int(x), int(y)))
+
             elif entity_type == EntityType.MINE:
 
                 mine = MineEntity(int(entity_id), int(x), int(y))
                 self.mines.append(mine)
-                self.field[(int(x), int(y))] = mine
+                self.collision.append((int(x), int(y)))
 
             elif entity_type == EntityType.SHIP:
 
@@ -332,7 +338,7 @@ class World(object):
                     self.enemyships.append(ship)
 
                 # устанавливаем центр
-                self.field[(int(x), int(y))] = 0
+                #self.field[(int(x), int(y))] = 0
 
     def collision(self, ship):
         """Проверяем пересечение коробля с минами"""
@@ -394,9 +400,18 @@ class World(object):
                     # определяем вес связи
                     next_distance = distance + 1
 
+                    mine_or_bomb = False
                     # проверяем коллизии с другими объектам 
-                    # for collision in future.collisions:
-                    #     if collision in self.collisions:
+                    for collision in future.collisions:
+                         if collision in self.collision:
+                             mine_or_bomb = True
+
+                         if next_distance in self.collision_future:
+                            if collision in self.collision_future[next_distance]:
+                                mine_or_bomb = True
+
+                    if mine_or_bomb == True:
+                        continue
 
                     for collision in future.collisions:
                         if collision in goals:
@@ -523,9 +538,7 @@ class Strategy(object):
 
         action = Actions.MOVE
 
-        if self.world.collision(ship):
-            action = Actions.EXCLUDE_MINE
-        elif ship.rum > 70:
+        if ship.rum > 70:
             action = Actions.MOVE_ENEMY
         elif near_enemy.speed == 0 and ship.dist_to(near_enemy) < 3:
             action = Actions.MOVE_ENEMY
