@@ -139,7 +139,7 @@ class ShipEntity(Entity):
         self.player = player
         self.fire_wait = 0
         # перечисление точек, в которых находится 
-        self.collitions = []
+        self.collisions = []
         self.command = None
 
     def update(self, x, y, rotation, speed, rum, player):
@@ -162,16 +162,6 @@ class ShipEntity(Entity):
                 min_dist = cur_dist
 
         return near_entity
-        
-    def can_move(self, world):
-        
-        cur_speed = min(1, self.speed) + 1
-        current_point = offset_to_cube((self.x,self.y))
-        next_point = cube_neighbor(current_point, self.rotation, cur_speed)
-
-        x,y = cube_to_offset(next_point)
-
-        return (0< x < 22) and (0 < y < 20)
 
     def make_command(self, command):
         if command[0] == Commands.MOVE:
@@ -204,7 +194,7 @@ class ShipEntity(Entity):
         hex = offset_to_cube((self.x, self.y))
 
         new_pos = cube_neighbor(hex, self.rotation, speed)
-        front = cube_neighbor(new_pos, (self.rotation + 3) % 6 , 1)
+        front = cube_neighbor(new_pos, self.rotation , -1)
         back = cube_neighbor(new_pos, self.rotation, 1)
 
         newx, newy = cube_to_offset(new_pos)
@@ -216,10 +206,10 @@ class ShipEntity(Entity):
         else:
             rotation = self.rotation
 
-        if not (0 < newx < 23):
+        if (0 > newx or newx > 22):
             return None
 
-        if not (0 < newy < 21):
+        if (0 > newy or newy> 20):
             return None
 
         new_ship = ShipEntity(self.entity_id, newx, newy, rotation, speed, self.rum-1, self.player)
@@ -228,7 +218,7 @@ class ShipEntity(Entity):
         new_ship.command = command
 
         # сначала запоминаем обычную позицию
-        new_ship.collitions = [cube_to_offset(back), cube_to_offset(new_pos), cube_to_offset(front)]
+        new_ship.collisions = [cube_to_offset(back), cube_to_offset(new_pos), cube_to_offset(front)]
 
 
         # потом добавляем результат поворота
@@ -236,8 +226,8 @@ class ShipEntity(Entity):
             front = cube_neighbor(new_pos, new_ship.rotation, -1)
             back = cube_neighbor(new_pos, new_ship.rotation, 1)
 
-            new_ship.collitions.append(cube_to_offset(back))
-            new_ship.collitions.append(cube_to_offset(front))
+            new_ship.collisions.append(cube_to_offset(back))
+            new_ship.collisions.append(cube_to_offset(front))
 
         return new_ship
 
@@ -316,7 +306,7 @@ class World(object):
             if entity_type == EntityType.BARREL:
                 barrel = BarrelEntity(int(entity_id), int(x), int(y), int(arg_1))
                 self.barrels.append(barrel)
-                self.field[(int(x), int(y))] = barrel
+                #self.field[(int(x), int(y))] = barrel
             elif entity_type == EntityType.CANNONBALL:
                 cannonball = CannonballEntity(int(entity_id), int(x), int(y), int(arg_1), int(arg_2))
                 #self.field[(int(x), int(y))] = int(arg_2)
@@ -325,7 +315,7 @@ class World(object):
                 mine = MineEntity(int(entity_id), int(x), int(y))
                 self.mines.append(mine)
                 self.field[(int(x), int(y))] = mine
-            
+
             elif entity_type == EntityType.SHIP:
 
                 if not int(entity_id) in self.allships:
@@ -363,42 +353,101 @@ class World(object):
     def uniform_cost_search(self, start, goals):
         """ За основу взят алгоритм с wiki
         https://en.wikipedia.org/wiki/Dijkstra's_algorithm
+        
         """
 
-        node = (start.x, start.y)
+        node = (start.x, start.y, start.rotation)
+
+        # обходим не в глубину, а с учетом уровня дерева
+
         frontier = [node]
+        next_frontier = []
         explored = []
 
         # определение оптимальных вершин
-        vertex = {node:(0, start, None)}
+        vertex = {node: (0, start, None)}
+
+        # ищем последнюю часть
+        find_target = None
+        find_goal   = None
+
+        # изменяем алгоритм поиска
+        # распостраняем волны до 50
 
         # пока есть что обходить
-        while not (node is None or len(frontier) == 0):
+
+        current_distance = 0
+
+        while not (node is None or len(frontier) == 0 or find_target is not None):
 
             node = frontier.pop()
 
             explored.append(node)
 
-            distance = vertex[node][0]
-            ship = vertex[node][1]
+            distance, ship, prev_node = vertex[node]
 
             for future in ship.futures():
-                for n in future.collitions:
-                    if n not in explored:
+                n = (future.x, future.y, future.rotation)
+                #for n in future.collisions:
+                if n not in explored:
 
-                        # определяем вес связи
-                        next_distance = distance + 1
+                    # определяем вес связи
+                    next_distance = distance + 1
 
-                        # помечаем текущую вершину
-                        if n not in vertex or next_distance < vertex[n][0]:
-                            vertex[n] = (next_distance, future, node)
+                    # проверяем коллизии с другими объектам 
+                    # for collision in future.collisions:
+                    #     if collision in self.collisions:
 
-                        if not (n in frontier or n in goals):
-                            frontier.append(n)
+                    for collision in future.collisions:
+                        if collision in goals:
+                            find_target = n
+                            find_goal = collision
 
-        return vertex
+                    # помечаем текущую вершину
+                    if n not in vertex or next_distance < vertex[n][0]:
+                        vertex[n] = (next_distance, future, node)
 
+                        for collision in future.collisions:
+                            if collision in goals:
+                                find_target = n
+                                find_goal = collision
 
+                    if not (n in frontier):
+                        next_frontier.append(n)
+
+            # проверяем что 
+            if len(frontier) == 0 and distance < 3:
+                frontier = next_frontier
+                next_frontier = []
+
+        if find_target == None:
+            min_dist = 100
+            min_drot = 6
+
+            for goal in goals:
+                ghex = offset_to_cube(goal)
+
+                # ищем ближайшего к нашей цели
+                for potential in next_frontier:
+                    px,py,protation = potential
+                    phex = offset_to_cube((px,py))
+
+                    dist = cube_distance(phex, ghex)
+
+                    if min_dist > dist:
+                        min_dist = dist
+                        find_target = potential
+                        find_goal = goal
+
+                    elif min_dist == dist:
+                        rotation = cube_rotation(phex, ghex)
+                        d_rot = (rotation - protation + 6) % 6
+                        if min_drot > d_rot:
+                            min_drot = d_rot
+                            find_target = potential
+                            find_goal = goal
+
+        return vertex, find_target, find_goal
 
     def find_shortest(self, start, unit_goals):
         """Описание алгоритма поиска кратчайшего пути"""
@@ -410,43 +459,25 @@ class World(object):
             goals.append((unit.x, unit.y))
             mapping_goals[(unit.x, unit.y)] = unit
 
-        print goals
+        #print goals
 
-        vertex = self.uniform_cost_search(start, goals)
+        vertex, node, goal = self.uniform_cost_search(start, goals)
         # востанавливаем цепочку
+        future = None
+        prev_future = None
+        while node is not None:
+            future = prev_future
+            dist, prev_future, node = vertex[node]
+        
+        # если не нашли, тогда ищем ближайшую цель
+        if node is None:
+            result = start.find_near_entity(unit_goals)
+        else:
+            result = mapping_goals[goal] 
 
-        target = None
-        min_len = 100
-        min_node = None
-        #min_solution, min_target = [], None
-        for goal in goals:
+        # бывают случаи, когда неопределена команда future
+        return result, future
 
-            if goal in vertex:
-                distance, future, node =  vertex[goal]
-                if distance < min_len:
-                    min_distance = distance
-                    min_node = goal
-
-        if min_node is not None:
-            target = mapping_goals[min_node]
-
-        print vertex, target
-
-        #    solution = [goal]
-        #    node = vertex[goal][2]
-        #    target = vertex[node][1]
-#
-        #    while node is not None:
-        #        solution.insert(0, node)
-        #        node = vertex[node][2]
-        #        target = vertex[node][1]
-#
-        #    if min_len > len(solution):
-        #        min_solution = solution
-        #        min_target = target
-
-        #print "@",vertex[goals[0]]
-        return target, None
 
 
 class Commands(object):
@@ -510,9 +541,6 @@ class Strategy(object):
         command = None
         action = None
 
-        #near_enemy = ship.find_near_entity(SUB(self.world.enemyships, exclude))
-        #near_barrel = ship.find_near_entity(SUB(self.world.barrels, exclude))
-
         near_enemy, near_enemy_move = self.world.find_shortest(ship, SUB(self.world.enemyships, exclude))
         near_barrel, near_barrel_move = self.world.find_shortest(ship, SUB(self.world.barrels, exclude))
 
@@ -553,8 +581,14 @@ class Strategy(object):
             elif action == Actions.MOVE_ENEMY:
 
                 if near_enemy.speed > 0 and ship.dist_to(near_enemy) > 3:
-                    action = Actions.MOVE
-                    target = near_enemy.x, near_enemy.y
+                    
+                    if near_enemy_move == None:
+                        action = Actions.MOVE
+                        target = near_enemy.x, near_enemy.y
+                    else:
+                        command = (near_enemy_move.command, None)
+
+                    #command = (near_enemy_move)
                 elif near_enemy.speed == 0:
                     action = Actions.FIRE
                 else:
@@ -570,8 +604,11 @@ class Strategy(object):
                 if near_barrel is None:
                     action = Actions.MOVE_ENEMY
                 else:
-                    action = Actions.MOVE
-                    target = near_barrel.x, near_barrel.y
+                    if near_barrel_move is None:
+                        action = Actions.MOVE
+                        target = near_barrel.x, near_barrel.y
+                    else:
+                        command = (near_barrel_move.command, None)
 
             elif action == Actions.FIRE_ENEMY:
                 if ship.fire_wait == 0:
@@ -611,12 +648,6 @@ class Strategy(object):
 
             elif action == Actions.MOVE_SLOWER:
                 command = (Commands.SLOWER, None)
-
-
-
-
-            print >> sys.stderr, action, command
-
 
         return command
 
