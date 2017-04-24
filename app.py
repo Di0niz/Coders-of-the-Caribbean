@@ -651,7 +651,7 @@ class Strategy(object):
                                 ship.future_fire = 2
                                 print >> sys.stderr, near_enemy, near_enemy.speed
                             action = Actions.FIRE_ENEMY
-                        el: 
+                        else: 
                             command = (near_enemy_move.command, None)
 
                     #command = (near_enemy_move)
