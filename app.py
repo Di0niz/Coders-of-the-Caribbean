@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys
+import random
 import math
 
 
@@ -141,6 +142,8 @@ class ShipEntity(Entity):
         # перечисление точек, в которых находится 
         self.collisions = []
         self.command = None
+        # усложняем поведение объектов
+        self.future_fire = 0 # используется для атаки на несколько ходов вперед
 
     def update(self, x, y, rotation, speed, rum, player):
         Entity.update(self, x, y)
@@ -149,6 +152,16 @@ class ShipEntity(Entity):
         self.rotation = rotation
         self.player = player
         self.fire_wait = max(0, self.fire_wait -1)
+        self.future_fire = 0
+
+        # при обновлении позиции перерасчитываем таблицу коллизий
+        cur_pos = offset_to_cube((self.x, self.y))
+
+        front = cube_neighbor(cur_pos,  self.rotation, 1)
+        back = cube_neighbor(cur_pos,   (self.rotation + 3) % 6, 1)
+
+        self.collisions = [cube_to_offset(back), cube_to_offset(cur_pos), cube_to_offset(front)]
+
 
     def find_near_entity(self, entities):
         near_entity = None
@@ -164,10 +177,20 @@ class ShipEntity(Entity):
         return near_entity
 
     def make_command(self, command):
+        """Добавляем стрельбу по прогнозу"""
         if command[0] == Commands.MOVE:
             res = "MOVE %d %d" % (command[1].x, command[1].y)
         elif command[0] == Commands.FIRE:
-            res = "FIRE %d %d" % (command[1].x, command[1].y)
+            ship_target = command[1]
+            if self.future_fire == 0:
+                target = (ship_target.x, ship_target.y)
+            else:
+                cur_pos = offset_to_cube((ship_target.x, ship_target.y))
+                future_pos = cube_neighbor(cur_pos, ship_target.rotation, self.future_fire)
+                target = cube_to_offset(future_pos)
+
+            res = "FIRE %d %d" % target
+
             self.fire_wait = 2
         elif command[0] == Commands.WAIT:
             res = "WAIT"
@@ -223,8 +246,8 @@ class ShipEntity(Entity):
 
         # потом добавляем результат поворота
         if rotation != self.rotation:
-            front = cube_neighbor(new_pos, new_ship.rotation, -1)
-            back = cube_neighbor(new_pos, new_ship.rotation, 1)
+            front = cube_neighbor(new_pos, rotation, -1)
+            back = cube_neighbor(new_pos, rotation, 1)
 
             new_ship.collisions.append(cube_to_offset(back))
             new_ship.collisions.append(cube_to_offset(front))
@@ -235,7 +258,11 @@ class ShipEntity(Entity):
         if self.rum == 0:
             return []
 
-        commands = [Commands.FASTER, Commands.PORT, Commands.STARBOARD, Commands.SLOWER, Commands.WAIT]
+        rand = random.random()
+        if rand > 0.3:
+            commands = [Commands.FASTER, Commands.PORT, Commands.STARBOARD, Commands.SLOWER]
+        else:
+            commands = [Commands.FASTER, Commands.STARBOARD, Commands.PORT, Commands.SLOWER]
         futures = []
         for com in commands:
             f_ship = self.future(com)
@@ -302,7 +329,7 @@ class World(object):
         for i in xrange(entity_count):
 
             raw = raw_input()
-            print >> sys.stderr, raw
+            print >> sys.stderr, raw 
             entity_id, entity_type, x, y, arg_1, arg_2, arg_3, arg_4 = raw.split()
             if entity_type == EntityType.BARREL:
                 barrel = BarrelEntity(int(entity_id), int(x), int(y), int(arg_1))
@@ -364,6 +391,8 @@ class World(object):
 
         node = (start.x, start.y, start.rotation)
 
+        others_ships = SUB(self.ships, start)
+
         # обходим не в глубину, а с учетом уровня дерева
 
         frontier = [node]
@@ -410,7 +439,14 @@ class World(object):
                             if collision in self.collision_future[next_distance]:
                                 mine_or_bomb = True
 
+                    for other in others_ships:
+                        for collision in future.collisions:
+                            if collision in other.collisions:
+                                mine_or_bomb = True
+
                     if mine_or_bomb == True:
+                        
+
                         continue
 
                     for collision in future.collisions:
@@ -434,6 +470,8 @@ class World(object):
             if len(frontier) == 0 and distance < 3:
                 frontier = next_frontier
                 next_frontier = []
+
+        print >> sys.stderr, "@1 ", next_frontier
 
         if find_target == None:
             min_dist = 100
@@ -462,6 +500,8 @@ class World(object):
                             find_target = potential
                             find_goal = goal
 
+        #print >> sys.stderr,"@u", start, find_target, find_goal
+
         return vertex, find_target, find_goal
 
     def find_shortest(self, start, unit_goals):
@@ -477,18 +517,23 @@ class World(object):
         #print goals
 
         vertex, node, goal = self.uniform_cost_search(start, goals)
+
+
         # востанавливаем цепочку
         future = None
         prev_future = None
         while node is not None:
             future = prev_future
             dist, prev_future, node = vertex[node]
-        
+
         # если не нашли, тогда ищем ближайшую цель
         if node is None:
             result = start.find_near_entity(unit_goals)
         else:
-            result = mapping_goals[goal] 
+            result = mapping_goals[goal]
+
+        print >> sys.stderr, "@ ", result, future
+
 
         # бывают случаи, когда неопределена команда future
         return result, future
@@ -560,6 +605,8 @@ class Strategy(object):
         action = self.find_problem(ship, near_enemy, near_barrel)
 
         target = 0
+        
+        print >> sys.stderr, ship
 
         while command is None:
 
@@ -599,14 +646,25 @@ class Strategy(object):
                         action = Actions.MOVE
                         target = near_enemy.x, near_enemy.y
                     else:
-                        command = (near_enemy_move.command, None)
+                        if ship.speed == 2 and near_enemy_move.command == Commands.FASTER:
+                            if near_enemy.speed > 0: 
+                                ship.future_fire = 2
+                                print >> sys.stderr, near_enemy, near_enemy.speed
+                            action = Actions.FIRE_ENEMY
+                        el: 
+                            command = (near_enemy_move.command, None)
 
                     #command = (near_enemy_move)
-                elif near_enemy.speed == 0:
-                    action = Actions.FIRE
+                elif near_enemy.speed == 0 and ship.dist_to(near_enemy) < 2:
+                    action = Actions.FIRE_ENEMY
                 else:
-                    command = (Commands.WAIT, )
-
+                    if near_enemy_move is not None:               
+                        command = (near_enemy_move.command, )
+                    elif near_barrel_move is not None:
+                        command = (near_barrel_move.command, )
+                    else:
+                        command = (Commands.WAIT, None)
+                        
             elif action == Actions.EXCLUDE_MINE:
                 if ship.speed == 2:
                     action = Actions.MOVE_SLOWER
@@ -626,6 +684,8 @@ class Strategy(object):
             elif action == Actions.FIRE_ENEMY:
                 if ship.fire_wait == 0:
                     command = (Commands.FIRE, near_enemy)
+                elif ship.fire_wait > 0 and near_enemy_move is not None :
+                    command = (near_enemy_move.command, None)
                 else:
                     command = (Commands.WAIT, None)
             elif action == Actions.FIRE:
@@ -662,6 +722,10 @@ class Strategy(object):
             elif action == Actions.MOVE_SLOWER:
                 command = (Commands.SLOWER, None)
 
+            print >> sys.stderr, action
+
+        print >> sys.stderr, command
+
         return command
 
 
@@ -681,12 +745,20 @@ if __name__ == '__main__':
             commands[my_ship] = STRATEGY.get_actions(my_ship)
 
         # проверяем есть ли дубли, если есть тогда исключаем общую цель
-    #    for i in WORLD.ships:
-    #        for j in WORLD.ships:
-    #            if i != j:
-    #                if commands[i][0] == Commands.MOVE and isinstance(commands[i][1],BarrelEntity):
-    #                    if commands[i][1] == commands[j][1]:
-    #                        commands[j] = STRATEGY.get_actions(j, commands[j][1])
+        len_ships = len(WORLD.ships)
+        for i in xrange(0, len_ships - 1):
+            fship = WORLD.ships[i]
+            for j in xrange(i+1, len_ships):
+                sship = WORLD.ships[j]
+                fc = commands[fship]
+                sc = commands[sship]
+
+                if fc[0] == Commands.FIRE:
+                    if fc == sc:
+                        # тогда второй корабль стреляем через два хода
+                        sship.future_fire = 1 + fc[1].speed
+                        print >> sys.stderr, (sship.x, sship.y)
+
         
         # выводим список доступных комманд
         # сохраняем порядок работы с короблем
